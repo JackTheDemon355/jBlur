@@ -11,7 +11,7 @@ from PIL import Image, ImageTk, ImageDraw, ImageFilter, ImageFont
 # ---------------------------------------------------------------------------
 # CONFIGURATION
 # ---------------------------------------------------------------------------
-CURRENT_VERSION = "1.4.3"
+CURRENT_VERSION = "1.4.4"
 UPDATE_URL = "https://raw.githubusercontent.com/JackTheDemon355/jBlur/refs/heads/main/update.py"
 
 # Rotating Ad Banners list (Includes your custom uploaded images)
