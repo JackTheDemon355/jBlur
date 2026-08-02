@@ -28,13 +28,18 @@ AD_BANNERS = [
     },
     {
         "name": "GitHub",
-        "image_url": "https://github.githubassets.com/images/modules/logos_page/GitHub-Logo.png",
+        "image_url": "https://logos-world.net/wp-content/uploads/2020/11/GitHub-Emblem.png",
         "link_url": "https://github.com"
     },
     {
         "name": "Python Foundation",
-        "image_url": "https://www.python.org/static/img/python-logo.png",
+        "image_url": "https://logos-world.net/wp-content/uploads/2021/10/Python-Logo.png",
         "link_url": "https://www.python.org"
+    },
+    {
+	"name": "YouTube",
+	"image_url": "https://logos-world.net/wp-content/uploads/2020/06/YouTube-Logo-500x281.webp",
+	"link_url": "https://youtube.com"
     }
 ]
 
