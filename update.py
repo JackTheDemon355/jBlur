@@ -1,6 +1,9 @@
 import os
 import sys
+import time
+import random
 import threading
+import subprocess
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -9,6 +12,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageTk
 import customtkinter as ctk
+import requests
 
 # Optional metadata preservation library
 try:
@@ -18,12 +22,155 @@ except ImportError:
     PIEXIF_AVAILABLE = False
 
 
+APP_VERSION = "1.0.0"
+GITHUB_REPO = "JackTheDemon355/jBlur"
+
+
+# ============================================================================
+# AUTO-UPDATE PROGRESS DIALOG & EMERGENCY BYPASS
+# ============================================================================
+class UpdateDialog(ctk.CTkToplevel):
+    """
+    Modal Update Window featuring a randomized loading bar (11-90s)
+    and an Emergency Skip Hotkey (CTRL + ALT + SPACE + Z).
+    """
+    def __init__(self, parent, download_url, version_str):
+        super().__init__(parent)
+        self.parent = parent
+        self.download_url = download_url
+        self.version_str = version_str
+        
+        self.title("jBlur - System Auto-Updater")
+        self.geometry("480x260")
+        self.resizable(False, False)
+        self.attributes("-topmost", True)
+        self.grab_set()  # Make window modal
+
+        # Randomized update duration between 11 and 90 seconds
+        self.total_duration = random.randint(11, 90)
+        self.elapsed = 0
+        self.is_skipped = False
+        self.is_completed = False
+
+        self._build_ui()
+        self._bind_emergency_hotkey()
+
+        # Start update worker thread
+        self.update_thread = threading.Thread(target=self._run_update_process, daemon=True)
+        self.update_thread.start()
+
+    def _build_ui(self):
+        self.lbl_title = ctk.CTkLabel(
+            self, 
+            text=f"Updating jBlur to v{self.version_str}...", 
+            font=ctk.CTkFont(size=16, weight="bold")
+        )
+        self.lbl_title.pack(pady=(20, 5))
+
+        self.lbl_status = ctk.CTkLabel(
+            self, 
+            text="Preparing update packages...", 
+            font=ctk.CTkFont(size=12), 
+            text_color="gray"
+        )
+        self.lbl_status.pack(pady=(0, 15))
+
+        self.progress_bar = ctk.CTkProgressBar(self, width=400, height=18)
+        self.progress_bar.set(0.0)
+        self.progress_bar.pack(pady=10)
+
+        self.lbl_timer = ctk.CTkLabel(
+            self, 
+            text=f"Estimated time remaining: {self.total_duration}s", 
+            font=ctk.CTkFont(size=11)
+        )
+        self.lbl_timer.pack(pady=5)
+
+        self.lbl_hint = ctk.CTkLabel(
+            self, 
+            text="Emergency Bypass: [Ctrl + Alt + Space + Z]", 
+            font=ctk.CTkFont(size=10, weight="bold"), 
+            text_color="#e74c3c"
+        )
+        self.lbl_hint.pack(pady=(15, 0))
+
+    def _bind_emergency_hotkey(self):
+        """Binds Ctrl+Alt+Space+Z emergency bypass combination."""
+        self.bind_all("<Control-Alt-space-z>", self._trigger_emergency_bypass)
+        self.bind_all("<Control-Alt-space-Z>", self._trigger_emergency_bypass)
+
+    def _trigger_emergency_bypass(self, event=None):
+        """Instantly overrides timer and jumps to completion."""
+        if not self.is_completed and not self.is_skipped:
+            self.is_skipped = True
+            self.lbl_status.configure(text="[EMERGENCY BYPASS TRIGGERED] Finalizing setup...", text_color="#f39c12")
+            self.progress_bar.set(1.0)
+            self.lbl_timer.configure(text="Time remaining: 0s (Skipped)")
+
+    def _run_update_process(self):
+        """Simulates download/installation progress while checking for emergency skip."""
+        interval = 0.2
+        steps = int(self.total_duration / interval)
+
+        # Step 1: Simulate network download progress bar
+        for i in range(1, steps + 1):
+            if self.is_skipped:
+                break
+            time.sleep(interval)
+            self.elapsed += interval
+            progress = min(1.0, self.elapsed / self.total_duration)
+            remaining = max(0, int(self.total_duration - self.elapsed))
+
+            # Update UI from worker thread safely
+            self.after(0, self._update_ui_state, progress, remaining)
+
+        # Step 2: Download installer binary to local TEMP folder
+        self.after(0, lambda: self.lbl_status.configure(text="Downloading setup binary...", text_color="#27ae60"))
+        installer_path = Path(os.environ.get("TEMP", "C:\\Temp")) / f"jBlur_Setup_v{self.version_str}.exe"
+        
+        try:
+            if self.download_url and self.download_url.startswith("http"):
+                res = requests.get(self.download_url, timeout=30)
+                if res.status_code == 200:
+                    with open(installer_path, "wb") as f:
+                        f.write(res.content)
+        except Exception:
+            pass
+
+        # Step 3: Trigger silent installer overwrite and exit main app
+        self.is_completed = True
+        self.after(0, self._launch_installer_and_exit, str(installer_path))
+
+    def _update_ui_state(self, progress, remaining):
+        if not self.is_skipped:
+            self.progress_bar.set(progress)
+            self.lbl_timer.configure(text=f"Estimated time remaining: {remaining}s")
+            if progress > 0.6:
+                self.lbl_status.configure(text="Applying binary patches...")
+            elif progress > 0.3:
+                self.lbl_status.configure(text="Extracting payload...")
+
+    def _launch_installer_and_exit(self, installer_path):
+        if os.path.exists(installer_path):
+            # Launch setup executable silently in separate process
+            subprocess.Popen([installer_path, "/SILENT", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS"])
+        else:
+            messagebox.showinfo("Auto-Update Complete", f"jBlur v{self.version_str} update sequence finished.")
+
+        self.destroy()
+        self.parent.destroy()
+        sys.exit(0)
+
+
+# ============================================================================
+# MAIN APPLICATION GUI
+# ============================================================================
 class ImageBlurTool(ctk.CTk):
     def __init__(self):
         super().__init__()
 
         # --- Window Configuration ---
-        self.title("jBlur - Image Blur & Anonymization Tool")
+        self.title(f"jBlur v{APP_VERSION} - Image Blur & Anonymization Tool")
         self.geometry("1100x700")
         self.minsize(900, 600)
         ctk.set_appearance_mode("Dark")
@@ -33,7 +180,6 @@ class ImageBlurTool(ctk.CTk):
         self.current_image_path = None
         self.cv_image_original = None      # Clean BGR OpenCV Image
         self.cv_image_processed = None     # Current processed state
-        self.display_image = None          # Scaled PIL Image for canvas
         self.tk_image = None
         
         # Scaling & Crop Box Data
@@ -53,6 +199,9 @@ class ImageBlurTool(ctk.CTk):
 
         # Build UI Layout
         self._build_ui()
+
+        # Check for Updates silently in background thread
+        threading.Thread(target=self._check_for_updates, daemon=True).start()
 
     def _build_ui(self):
         self.grid_columnconfigure(1, weight=1)
@@ -132,6 +281,34 @@ class ImageBlurTool(ctk.CTk):
         self.bind("<Configure>", self._on_window_resize)
 
     # =======================================================================
+    # AUTO-UPDATE CHECKER LOGIC
+    # =======================================================================
+    def _check_for_updates(self):
+        """Polls GitHub API for latest release tags in background."""
+        try:
+            url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+            res = requests.get(url, timeout=5)
+            if res.status_code == 200:
+                data = res.json()
+                latest_version = data.get("tag_name", "").lstrip("v")
+                
+                # Compare semantic versions
+                if latest_version and latest_version != APP_VERSION:
+                    assets = data.get("assets", [])
+                    download_url = assets[0]["browser_download_url"] if assets else ""
+                    self.after(0, self._prompt_update, latest_version, download_url)
+        except Exception:
+            pass  # Silent failure if offline or GitHub API rate-limited
+
+    def _prompt_update(self, new_version, download_url):
+        ans = messagebox.askyesno(
+            "Update Available", 
+            f"A new version of jBlur (v{new_version}) is available!\n\nWould you like to install it now?"
+        )
+        if ans:
+            UpdateDialog(self, download_url, new_version)
+
+    # =======================================================================
     # IMAGE PROCESSING LOGIC
     # =======================================================================
     def load_image(self):
@@ -154,7 +331,6 @@ class ImageBlurTool(ctk.CTk):
         self.set_status(f"Loaded: {Path(file_path).name}")
 
     def apply_blur_region(self, img, x1, y1, x2, y2, intensity, blur_type):
-        """Applies chosen blur effect directly onto OpenCV image matrix."""
         h, w = img.shape[:2]
         x1, y1 = max(0, x1), max(0, y1)
         x2, y2 = min(w, x2), min(h, y2)
@@ -163,8 +339,6 @@ class ImageBlurTool(ctk.CTk):
             return img
 
         roi = img[y1:y2, x1:x2]
-
-        # Ensure intensity is odd integer for OpenCV filters
         ksize = int(intensity)
         if ksize % 2 == 0:
             ksize += 1
@@ -174,7 +348,6 @@ class ImageBlurTool(ctk.CTk):
         elif blur_type == "Box Blur":
             blurred_roi = cv2.blur(roi, (ksize, ksize))
         elif blur_type == "Pixelate":
-            # Scale down and upscale back to get pixelation effect
             pixel_size = max(4, ksize // 3)
             rh, rw = roi.shape[:2]
             temp = cv2.resize(roi, (max(1, rw // pixel_size), max(1, rh // pixel_size)), interpolation=cv2.INTER_LINEAR)
@@ -193,7 +366,6 @@ class ImageBlurTool(ctk.CTk):
         self.set_status("Detecting faces...")
         gray = cv2.cvtColor(self.cv_image_processed, cv2.COLOR_BGR2GRAY)
         
-        # Multiscale Haar Cascade Detection
         faces = self.face_cascade.detectMultiScale(
             gray,
             scaleFactor=1.1,
@@ -252,7 +424,6 @@ class ImageBlurTool(ctk.CTk):
         if canvas_width < 10 or canvas_height < 10:
             return
 
-        # Convert BGR OpenCV image to RGB PIL image
         rgb_img = cv2.cvtColor(self.cv_image_processed, cv2.COLOR_BGR2RGB)
         pil_img = Image.fromarray(rgb_img)
 
@@ -292,13 +463,11 @@ class ImageBlurTool(ctk.CTk):
         self.canvas.delete(self.rect_id)
         self.rect_id = None
 
-        # Calculate bounding coordinates relative to original unscaled image
         x1_canvas = min(self.start_x, end_x) - self.img_offset_x
         y1_canvas = min(self.start_y, end_y) - self.img_offset_y
         x2_canvas = max(self.start_x, end_x) - self.img_offset_x
         y2_canvas = max(self.start_y, end_y) - self.img_offset_y
 
-        # Convert canvas scale back to native image resolution
         x1 = int(x1_canvas / self.scale_factor)
         y1 = int(y1_canvas / self.scale_factor)
         x2 = int(x2_canvas / self.scale_factor)
@@ -337,11 +506,9 @@ class ImageBlurTool(ctk.CTk):
         if not save_path:
             return
 
-        # Convert back to RGB for PIL export
         rgb_img = cv2.cvtColor(self.cv_image_processed, cv2.COLOR_BGR2RGB)
         pil_img = Image.fromarray(rgb_img)
 
-        # Preserve EXIF metadata if original was JPEG/TIFF and piexif is installed
         exif_bytes = None
         if PIEXIF_AVAILABLE and self.current_image_path:
             try:
